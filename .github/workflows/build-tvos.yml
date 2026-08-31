@@ -1,0 +1,54 @@
+name: Build OrionTV tvOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build-tvos:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: 'yarn'
+
+      - name: Install Dependencies
+        run: |
+          yarn install
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build tvOS Archive
+        run: |
+          xcodebuild archive \
+            -workspace ios/OrionTV.xcworkspace \
+            -scheme OrionTV-tvOS \
+            -sdk appletvos \
+            -configuration Release \
+            -archivePath $RUNNER_TEMP/OrionTV.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            BUILD_DIR=$RUNNER_TEMP/build
+
+      - name: Package Unsigned IPA
+        run: |
+          mkdir -p $RUNNER_TEMP/Payload
+          cp -r $RUNNER_TEMP/OrionTV.xcarchive/Products/Applications/*.app $RUNNER_TEMP/Payload/
+          cd $RUNNER_TEMP
+          zip -r OrionTV-tvOS-Unsigned.ipa Payload
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OrionTV-tvOS-IPA
+          path: ${{ runner.temp }}/OrionTV-tvOS-Unsigned.ipa
+          retention-days: 7
