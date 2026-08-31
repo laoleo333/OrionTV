@@ -22,11 +22,14 @@ jobs:
       - name: Install Dependencies
         run: yarn install
 
-      # 1. 动态生成 iOS / tvOS 原生工程
-      - name: Expo Prebuild
-        run: EXPO_NO_TELEMETRY=1 npx expo prebuild --platform ios --clean
+      # 1. 注入 EXPO_TV 环境变量，强制 Expo 启用 tvOS 平台配置生成
+      - name: Expo Prebuild for tvOS
+        env:
+          EXPO_TV: "true"
+          EXPO_NO_TELEMETRY: "1"
+        run: npx expo prebuild --platform ios --clean
 
-      # 2. 安全地修改 Podfile，在已有的 post_install 内部注入参数（避免重复定义）
+      # 2. 修改 Podfile，注入 C++ 与 tvOS 兼容参数
       - name: Patch Podfile Safely
         run: |
           node -e '
@@ -44,25 +47,31 @@ jobs:
               end
             `;
 
-            // 插入到现有 post_install do |installer| 的第一行内部
             podfile = podfile.replace(/post_install\s+do\s+\|installer\|/, "post_install do |installer|\n" + patchCode);
             fs.writeFileSync("ios/Podfile", podfile);
           '
 
-      # 3. 执行 Pod 安装
+      # 3. 安装 CocoaPods 依赖
       - name: Install Pods
         run: |
           cd ios
           pod install --repo-update || pod install
           cd ..
 
-      # 4. 执行 tvOS Archive 编译
+      # 4. 自动匹配 OrionTV 的 tvOS 专属 Scheme 进行编译
       - name: Build tvOS Archive
         run: |
+          # 检查匹配 OrionTV-tvOS 或 OrionTV 的 Scheme
+          SCHEME_NAME=$(xcodebuild -list -workspace ios/*.xcworkspace | grep -i "tvOS" | head -n 1 | xargs)
+          if [ -z "$SCHEME_NAME" ]; then
+            SCHEME_NAME="OrionTV"
+          fi
+          echo "Selected Scheme: $SCHEME_NAME"
+
           xcodebuild archive \
-            -workspace ios/OrionTV.xcworkspace \
-            -scheme OrionTV \
-            -destination 'generic/platform=tvOS' \
+            -workspace ios/*.xcworkspace \
+            -scheme "$SCHEME_NAME" \
+            -sdk appletvos \
             -configuration Release \
             -archivePath $RUNNER_TEMP/OrionTV.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
@@ -78,7 +87,7 @@ jobs:
           cd $RUNNER_TEMP
           zip -r OrionTV-tvOS-Unsigned.ipa Payload
 
-      # 6. 上传 IPA 产物
+      # 6. 上传编译产物
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
