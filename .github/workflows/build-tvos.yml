@@ -26,24 +26,28 @@ jobs:
       - name: Expo Prebuild
         run: EXPO_NO_TELEMETRY=1 npx expo prebuild --platform ios --clean
 
-      # 2. 修改 Podfile 注入 post_install 补丁，强制放宽 Xcode 对 tcp-socket 的严格警告检查
-      - name: Patch Podfile for tvOS
+      # 2. 安全地修改 Podfile，在已有的 post_install 内部注入参数（避免重复定义）
+      - name: Patch Podfile Safely
         run: |
-          cat << 'EOF' >> ios/Podfile
-
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
-              target.build_configurations.each do |config|
-                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
-                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'TARGET_OS_TV=1'
-                config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
-                config.build_settings['ENABLE_BITCODE'] = 'NO'
-                # 忽略第三方库的严格编译错误警告
-                config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+          node -e '
+            const fs = require("fs");
+            let podfile = fs.readFileSync("ios/Podfile", "utf8");
+            
+            const patchCode = `
+              installer.pods_project.targets.each do |target|
+                target.build_configurations.each do |config|
+                  config.build_settings["GCC_PREPROCESSOR_DEFINITIONS"] ||= ["$(inherited)"]
+                  config.build_settings["GCC_PREPROCESSOR_DEFINITIONS"] << "TARGET_OS_TV=1"
+                  config.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
+                  config.build_settings["GCC_WARN_INHIBIT_ALL_WARNINGS"] = "YES"
+                end
               end
-            end
-          end
-          EOF
+            `;
+
+            // 插入到现有 post_install do |installer| 的第一行内部
+            podfile = podfile.replace(/post_install\s+do\s+\|installer\|/, "post_install do |installer|\n" + patchCode);
+            fs.writeFileSync("ios/Podfile", podfile);
+          '
 
       # 3. 执行 Pod 安装
       - name: Install Pods
