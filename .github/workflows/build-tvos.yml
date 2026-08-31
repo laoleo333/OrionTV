@@ -22,23 +22,23 @@ jobs:
       - name: Install Dependencies
         run: yarn install
 
-      # 使用 Expo 生成原生 iOS/tvOS 工程结构
+      # 动态生成 iOS / tvOS 原生工程结构
       - name: Expo Prebuild
         run: npx expo prebuild --platform ios
 
-      # 安装 iOS/tvOS 原生 Pod 依赖
+      # 安装 Pod 依赖
       - name: Install Pods
         run: |
           cd ios
           pod install
           cd ..
 
-      # 编译 Xcode Archive（禁用证书签名）
+      # 编译 tvOS Archive (明确指定 Workspace 与 Scheme)
       - name: Build tvOS Archive
         run: |
           xcodebuild archive \
-            -workspace ios/*.xcworkspace \
-            -scheme $(xcodebuild -list -workspace ios/*.xcworkspace | grep -i "tvOS" | head -n 1 | xargs) \
+            -workspace ios/OrionTV.xcworkspace \
+            -scheme OrionTV \
             -sdk appletvos \
             -configuration Release \
             -archivePath $RUNNER_TEMP/OrionTV.xcarchive \
@@ -47,7 +47,7 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             BUILD_DIR=$RUNNER_TEMP/build
 
-      # 打包成无签名 IPA
+      # 打包无签名 IPA
       - name: Package Unsigned IPA
         run: |
           mkdir -p $RUNNER_TEMP/Payload
@@ -55,7 +55,7 @@ jobs:
           cd $RUNNER_TEMP
           zip -r OrionTV-tvOS-Unsigned.ipa Payload
 
-      # 上传编译好的 IPA 文件
+      # 上传构件
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
