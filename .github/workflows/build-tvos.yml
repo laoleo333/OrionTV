@@ -16,24 +16,24 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 20
           cache: 'yarn'
 
       - name: Install Dependencies
         run: yarn install
 
-      # 动态生成 iOS / tvOS 原生工程结构
+      # 1. 禁用预编译静态库的 C++ 严格检查，规避 react-native-tcp-socket 编译错误
       - name: Expo Prebuild
-        run: npx expo prebuild --platform ios
+        run: EXPO_NO_TELEMETRY=1 npx expo prebuild --platform ios --clean
 
-      # 安装 Pod 依赖
+      # 2. 安装 CocoaPods 依赖
       - name: Install Pods
         run: |
           cd ios
-          pod install
+          pod install --repo-update || pod install
           cd ..
 
-      # 编译 tvOS Archive (明确指定 Workspace 与 Scheme)
+      # 3. 编译 Archive（注入 CLANG_ALLOW_NON_MODULAR_INCLUDES 规避 C++ 头文件错误）
       - name: Build tvOS Archive
         run: |
           xcodebuild archive \
@@ -45,9 +45,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
+            CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES=YES \
+            GCC_PREPROCESSOR_DEFINITIONS='$PARENT $(inherited) TARGET_OS_TV=1' \
             BUILD_DIR=$RUNNER_TEMP/build
 
-      # 打包无签名 IPA
+      # 4. 打包无签名 IPA
       - name: Package Unsigned IPA
         run: |
           mkdir -p $RUNNER_TEMP/Payload
@@ -55,7 +57,7 @@ jobs:
           cd $RUNNER_TEMP
           zip -r OrionTV-tvOS-Unsigned.ipa Payload
 
-      # 上传构件
+      # 5. 上传 Artifact 供下载
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
