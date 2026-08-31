@@ -22,34 +22,51 @@ jobs:
       - name: Install Dependencies
         run: yarn install
 
-      # 1. 禁用预编译静态库的 C++ 严格检查，规避 react-native-tcp-socket 编译错误
+      # 1. 动态生成 iOS / tvOS 原生工程
       - name: Expo Prebuild
         run: EXPO_NO_TELEMETRY=1 npx expo prebuild --platform ios --clean
 
-      # 2. 安装 CocoaPods 依赖
+      # 2. 修改 Podfile 注入 post_install 补丁，强制放宽 Xcode 对 tcp-socket 的严格警告检查
+      - name: Patch Podfile for tvOS
+        run: |
+          cat << 'EOF' >> ios/Podfile
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
+                config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << 'TARGET_OS_TV=1'
+                config.build_settings['CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES'] = 'YES'
+                config.build_settings['ENABLE_BITCODE'] = 'NO'
+                # 忽略第三方库的严格编译错误警告
+                config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+              end
+            end
+          end
+          EOF
+
+      # 3. 执行 Pod 安装
       - name: Install Pods
         run: |
           cd ios
           pod install --repo-update || pod install
           cd ..
 
-      # 3. 编译 Archive（注入 CLANG_ALLOW_NON_MODULAR_INCLUDES 规避 C++ 头文件错误）
+      # 4. 执行 tvOS Archive 编译
       - name: Build tvOS Archive
         run: |
           xcodebuild archive \
             -workspace ios/OrionTV.xcworkspace \
             -scheme OrionTV \
-            -sdk appletvos \
+            -destination 'generic/platform=tvOS' \
             -configuration Release \
             -archivePath $RUNNER_TEMP/OrionTV.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES=YES \
-            GCC_PREPROCESSOR_DEFINITIONS='$PARENT $(inherited) TARGET_OS_TV=1' \
             BUILD_DIR=$RUNNER_TEMP/build
 
-      # 4. 打包无签名 IPA
+      # 5. 打包无签名 IPA
       - name: Package Unsigned IPA
         run: |
           mkdir -p $RUNNER_TEMP/Payload
@@ -57,7 +74,7 @@ jobs:
           cd $RUNNER_TEMP
           zip -r OrionTV-tvOS-Unsigned.ipa Payload
 
-      # 5. 上传 Artifact 供下载
+      # 6. 上传 IPA 产物
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
